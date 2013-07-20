@@ -16,7 +16,7 @@ MODULE_DESCRIPTION("A simple character driver");
 
 #define GLOBALMEM_SIZE 0x1000 //全局最大内存
 #define MEM_CLEAR 0x1	//清0
-#define GLOBALMEM_MAJOR 0//预设的主设备号
+#define GLOBALMEM_MAJOR 250//预设的主设备号
 
 static int globalmem_major = GLOBALMEM_MAJOR;
 
@@ -25,6 +25,7 @@ struct globalmem_dev
 {
 	struct cdev cdev;//cdev 结构体
 	unsigned char mem[GLOBALMEM_SIZE];//全局内存
+	struct semaphore sem;//并发控制用的信号量
 };
 
 struct globalmem_dev *devp;
@@ -45,7 +46,10 @@ static long globalmem_ioctl(struct file *filp,unsigned int cmd,unsigned long arg
 	struct globalmem_dev *devp = filp->private_data;
 	switch(cmd){
 	case MEM_CLEAR:
+		if(down_interruptible(&dev->sem))//获得信号量
+			return -ERESTARTSYS;
 		memset(devp->mem,0,GLOBALMEM_SIZE);
+		up(&dev->sem);//释放信号量 
 		printk(KERN_INFO "globalmem is set to zero!\n");
 		break;
 	default:
@@ -63,6 +67,8 @@ static ssize_t globalmem_read(struct file *filp,char __user *buf,size_t count,lo
 		return 0;
 	if(count > GLOBALMEM_SIZE - p)//要读的字节数太大
 		count = GLOBALMEM_SIZE - p;
+	if(down_interruptible(&dev->sem))//获得信号量
+		return -ERESTARTSYS;
 	if(copy_to_user(buf,(void *)(devp->mem+p),count))
 		ret = -EFAULT;
 	else{
@@ -70,6 +76,7 @@ static ssize_t globalmem_read(struct file *filp,char __user *buf,size_t count,lo
 		ret = count;
 		printk(KERN_INFO "read %u bytes from %lu\n",count,p);
 	}
+	up(&dev->sem);//释放信号量
 	return ret;
 }
 
@@ -83,6 +90,8 @@ static ssize_t globalmem_write(struct file *filp,const char __user *buf,size_t c
 		return 0;
 	if(count > GLOBALMEM_SIZE - p)
 		count = GLOBALMEM_SIZE - p;
+	if(down_interruptible(&dev->sem))//获得信号量
+		return -ERESTARTSYS;
 	if(copy_from_user((void*)(devp->mem+p),buf,count))
 		ret = -EFAULT;
 	else{
@@ -90,6 +99,7 @@ static ssize_t globalmem_write(struct file *filp,const char __user *buf,size_t c
 		ret = count;
 		printk(KERN_INFO "write %u bytes to %lu \n",count,p);
 	}
+	up(&dev->sem);//释放信号量
 	return ret;
 }
 
@@ -180,7 +190,7 @@ int globalmem_init(void)
 	}
 	memset(devp,0,sizeof(struct globalmem_dev));
 	globalmem_setup_cdev(devp,0);
-	printk(KERN_ALERT "dev major is %d , usage mknod /dev/globalmem c major minor\n",globalmem_major);
+	init_MUTEX(&globalmem_devp->sem);//初始化信号量
 	return 0;
 fail_malloc:
 	unregister_chrdev_region(devno,1);

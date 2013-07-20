@@ -1,0 +1,1 @@
+cmd_/home/jefby/workplace/Coding/LDD/add_poll/globalfifo.ko := ld -r -m elf_i386 -T /usr/src/linux-headers-3.8.0-26-generic/scripts/module-common.lds --build-id  -o /home/jefby/workplace/Coding/LDD/add_poll/globalfifo.ko /home/jefby/workplace/Coding/LDD/add_poll/globalfifo.o /home/jefby/workplace/Coding/LDD/add_poll/globalfifo.mod.o
