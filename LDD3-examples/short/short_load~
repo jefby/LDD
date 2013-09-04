@@ -28,7 +28,7 @@ mknod /dev/${device}5 c $major 5
 mknod /dev/${device}6 c $major 6
 mknod /dev/${device}7 c $major 7
 
-rm -f /dev/${device}[0-7][ps]
+rm -f /dev/${device}[0-3][ps]
 mknod /dev/${device}0p c $major 16
 mknod /dev/${device}1p c $major 17
 mknod /dev/${device}2p c $major 18
