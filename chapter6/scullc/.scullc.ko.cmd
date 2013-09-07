@@ -1,0 +1,1 @@
+cmd_/home/jefby/workplace/LDD3-jefby/chapter6/scullc/scullc.ko := ld -m elf_i386 -r -o /home/jefby/workplace/LDD3-jefby/chapter6/scullc/scullc.ko /home/jefby/workplace/LDD3-jefby/chapter6/scullc/scullc.o /home/jefby/workplace/LDD3-jefby/chapter6/scullc/scullc.mod.o

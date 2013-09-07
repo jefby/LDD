@@ -1,0 +1,1 @@
+cmd_/home/jefby/workplace/LDD3-jefby/chapter6/scullsingle/scull.ko := ld -m elf_i386 -r -o /home/jefby/workplace/LDD3-jefby/chapter6/scullsingle/scull.ko /home/jefby/workplace/LDD3-jefby/chapter6/scullsingle/scull.o /home/jefby/workplace/LDD3-jefby/chapter6/scullsingle/scull.mod.o

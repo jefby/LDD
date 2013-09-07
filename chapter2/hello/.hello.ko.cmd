@@ -1,0 +1,1 @@
+cmd_/home/jefby/workplace/LDD3-jefby/chapter2/hello/hello.ko := ld -m elf_i386 -r -o /home/jefby/workplace/LDD3-jefby/chapter2/hello/hello.ko /home/jefby/workplace/LDD3-jefby/chapter2/hello/hello.o /home/jefby/workplace/LDD3-jefby/chapter2/hello/hello.mod.o

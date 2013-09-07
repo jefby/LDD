@@ -1,0 +1,1 @@
+cmd_/home/jefby/workplace/LDD3-jefby/chapter6/scullp/scullp.ko := ld -m elf_i386 -r -o /home/jefby/workplace/LDD3-jefby/chapter6/scullp/scullp.ko /home/jefby/workplace/LDD3-jefby/chapter6/scullp/scullp.o /home/jefby/workplace/LDD3-jefby/chapter6/scullp/scullp.mod.o
