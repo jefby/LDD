@@ -13,6 +13,16 @@
  * we cannot take responsibility for errors or fitness for use.
  */
 
+/*
+ * added by jefby
+ * struct scullc_dev结构是这样的,它可以被看做一个块,结构中包含指向下一块数据的指针
+ * 数据由指针void **data保存,其中data可以被看做这个块在内存中的地址,它是一个数组,
+ * 保存着实际的页的指针,数组的大小由qset确定,而每一页的大小由quantum确定
+ *
+ *
+ *
+ */
+
 #include <linux/ioctl.h>
 #include <linux/cdev.h>
 
@@ -53,14 +63,14 @@
 #define SCULLC_QSET     500
 
 struct scullc_dev {
-	void **data;
+	void **data;//数据
 	struct scullc_dev *next;  /* next listitem */
 	int vmas;                 /* active mappings */
-	int quantum;              /* the current allocation size */
-	int qset;                 /* the current array size */
+	int quantum;              /* the current allocation size */ //每个元素大小
+	int qset;                 /* the current array size */ //当前数组中元素的个数
 	size_t size;              /* 32-bit will suffice */
-	struct semaphore sem;     /* Mutual exclusion */
-	struct cdev cdev;
+	struct semaphore sem;     /* Mutual exclusion */ //信号量用于互斥访问
+	struct cdev cdev;	//字符设备
 };
 
 extern struct scullc_dev *scullc_devices;

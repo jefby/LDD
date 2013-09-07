@@ -381,7 +381,6 @@ static int scullc_init_module(void)
 		init_MUTEX(&scullc_devices[i].sem);
 		scullc_setup_cdev(&scullc_devices[i],i);
 	}
-	//创建高速缓存对象,每个内存的大小固定为scullc_quantum
 	scullc_cache = kmem_cache_create("scullc",scullc_quantum,0,SLAB_HWCACHE_ALIGN,NULL,NULL);
 	if(!scullc_cache){
 		scullc_cleanup_module();

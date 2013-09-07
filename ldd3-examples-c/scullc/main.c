@@ -178,11 +178,11 @@ ssize_t scullc_read (struct file *filp, char __user *buf, size_t count,
 	int item, s_pos, q_pos, rest;
 	ssize_t retval = 0;
 
-	if (down_interruptible (&dev->sem))
+	if (down_interruptible (&dev->sem))//若被中断返回非0值
 		return -ERESTARTSYS;
-	if (*f_pos > dev->size) 
+	if (*f_pos > dev->size) //如果当前指针位置越界,则跳转到nothing处
 		goto nothing;
-	if (*f_pos + count > dev->size)
+	if (*f_pos + count > dev->size)//若读取的数量大于设备文件大小,只读取到文件结尾处
 		count = dev->size - *f_pos;
 	/* find listitem, qset index, and offset in the quantum */
 	item = ((long) *f_pos) / itemsize;
@@ -196,16 +196,16 @@ ssize_t scullc_read (struct file *filp, char __user *buf, size_t count,
 		goto nothing; /* don't fill holes */
 	if (!dptr->data[s_pos])
 		goto nothing;
-	if (count > quantum - q_pos)
+	if (count > quantum - q_posa)//每次读取时检查是否到达该页的结尾处,若到了则修改本次读取的字节数
 		count = quantum - q_pos; /* read only up to the end of this quantum */
 
-	if (copy_to_user (buf, dptr->data[s_pos]+q_pos, count)) {
+	if (copy_to_user (buf, dptr->data[s_pos]+q_pos, count)) {//拷贝到buf所指的用户空间,若不成功，设置返回值为-EFAULT
 		retval = -EFAULT;
 		goto nothing;
 	}
 	up (&dev->sem);
 
-	*f_pos += count;
+	*f_pos += count;//更新文件指针
 	return count;
 
   nothing:
@@ -218,44 +218,45 @@ ssize_t scullc_read (struct file *filp, char __user *buf, size_t count,
 ssize_t scullc_write (struct file *filp, const char __user *buf, size_t count,
                 loff_t *f_pos)
 {
-	struct scullc_dev *dev = filp->private_data;
+	struct scullc_dev *dev = filp->private_data;//获取设备指针
 	struct scullc_dev *dptr;
-	int quantum = dev->quantum;
-	int qset = dev->qset;
-	int itemsize = quantum * qset;
+	int quantum = dev->quantum;//当前量子(元素)的大小
+	int qset = dev->qset;//元素的个数
+	int itemsize = quantum * qset;//数组大小
 	int item, s_pos, q_pos, rest;
 	ssize_t retval = -ENOMEM; /* our most likely error */
 
-	if (down_interruptible (&dev->sem))
-		return -ERESTARTSYS;
+	if (down_interruptible (&dev->sem))//如果被中断,则返回非零值
+		return -ERESTARTSYS;//直接退出
 
 	/* find listitem, qset index and offset in the quantum */
 	item = ((long) *f_pos) / itemsize;
 	rest = ((long) *f_pos) % itemsize;
-	s_pos = rest / quantum; q_pos = rest % quantum;
+	s_pos = rest / quantum; 
+	q_pos = rest % quantum;
 
 	/* follow the list up to the right position */
-	dptr = scullc_follow(dev, item);
-	if (!dptr->data) {
-		dptr->data = kmalloc(qset * sizeof(void *), GFP_KERNEL);
-		if (!dptr->data)
+	dptr = scullc_follow(dev, item);//查找到当前块所在处
+	if (!dptr->data) {//若该数据未分配
+		dptr->data = kmalloc(qset * sizeof(void *), GFP_KERNEL);//使用kmalloc申请一段内存,大小为qset*sizeof(void*),保存页的指针
+		if (!dptr->data)//分配失败
 			goto nomem;
-		memset(dptr->data, 0, qset * sizeof(char *));
+		memset(dptr->data, 0, qset * sizeof(char *));//初始化数组所有元素为0
 	}
 	/* Allocate a quantum using the memory cache */
-	if (!dptr->data[s_pos]) {
-		dptr->data[s_pos] = kmem_cache_alloc(scullc_cache, GFP_KERNEL);
-		if (!dptr->data[s_pos])
+	if (!dptr->data[s_pos]) {//该页未被分配,则申请空间,使用后备高速缓存
+		dptr->data[s_pos] = kmem_cache_alloc(scullc_cache, GFP_KERNEL);//从高速缓存中分配内存对象
+		if (!dptr->data[s_pos])//分配失败
 			goto nomem;
-		memset(dptr->data[s_pos], 0, scullc_quantum);
+		memset(dptr->data[s_pos], 0, scullc_quantum);//初始化为0
 	}
-	if (count > quantum - q_pos)
+	if (count > quantum - q_pos)//设置本次写的字节数目
 		count = quantum - q_pos; /* write only up to the end of this quantum */
-	if (copy_from_user (dptr->data[s_pos]+q_pos, buf, count)) {
+	if (copy_from_user (dptr->data[s_pos]+q_pos, buf, count)) {//从用户空间拷贝数据到设备中,若失败,设置返回值
 		retval = -EFAULT;
 		goto nomem;
 	}
-	*f_pos += count;
+	*f_pos += count;//更新文件指针
  
     	/* update the size */
 	if (dev->size < *f_pos)
@@ -505,12 +506,14 @@ int scullc_trim(struct scullc_dev *dev)
 
 static void scullc_setup_cdev(struct scullc_dev *dev, int index)
 {
-	int err, devno = MKDEV(scullc_major, index);
+	int err, devno = MKDEV(scullc_major, index);//生成设备号(scullc_major,index)
     
-	cdev_init(&dev->cdev, &scullc_fops);
+	//用于初始化cdev的成员，并建立cdev和file_operations之间的连接
+	cdev_init(&dev->cdev, &scullc_fops);//初始化cdev,设置操作函数scullc_fops
 	dev->cdev.owner = THIS_MODULE;
 	dev->cdev.ops = &scullc_fops;
-	err = cdev_add (&dev->cdev, devno, 1);
+	//向系统中添加一个cdev,完成字符设备的注册
+	err = cdev_add (&dev->cdev, devno, 1);//激活字符设备dev
 	/* Fail gracefully if need be */
 	if (err)
 		printk(KERN_NOTICE "Error %d adding scull%d", err, index);
@@ -556,7 +559,7 @@ int scullc_init(void)
 		sema_init (&scullc_devices[i].sem, 1);
 		scullc_setup_cdev(scullc_devices + i, i);
 	}
-
+//创建高速缓存对象
 	scullc_cache = kmem_cache_create("scullc", scullc_quantum,
 			0, SLAB_HWCACHE_ALIGN, NULL, NULL); /* no ctor/dtor */
 	if (!scullc_cache) {
@@ -589,10 +592,10 @@ void scullc_cleanup(void)
 		scullc_trim(scullc_devices + i);
 	}
 	kfree(scullc_devices);
-
+	//释放高速缓存对象scullc_cache
 	if (scullc_cache)
 		kmem_cache_destroy(scullc_cache);
-	unregister_chrdev_region(MKDEV (scullc_major, 0), scullc_devs);
+	unregister_chrdev_region(MKDEV (scullc_major, 0), scullc_devs);//释放设备号
 }
 
 

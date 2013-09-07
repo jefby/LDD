@@ -47,14 +47,14 @@
 * Representation of scull quantum sets
 */
 struct scull_qset{
-	void **data;//块数据
-	struct scull_qset *next;//指向下一个块指针
+	void **data;
+	struct scull_qset *next;
 };
 
 struct scull_dev{
 	struct scull_qset *data;//pointer to first quantum set
-	int quantum;//页大小
-	int qset;//块中页的个数
+	int quantum;//
+	int qset;
 	unsigned long size;//amount of data stored here
 	unsigned int access_key;//used by sculluid and scullpriv
 	struct semaphore sem;//mutual exclusion sempahore
