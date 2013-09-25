@@ -244,7 +244,7 @@ static int vmem_disk_revalidate(struct gendisk *disk)
 }
 
 //处理一个I/O request
-//数据移动,req->sector：开始扇区的索引号,req->current_nr_sectors:需要传输的扇区数 buffer:要传输或者要接收数据的缓冲区指针
+////数据移动,req->sector：开始扇区的索引号,req->current_nr_sectors:需要传输的扇区数 buffer:要传输或者要接收数据的缓冲区指针
 //该指针在内核虚拟地址中，如果有需要，内核可以直接引用它 req_data_dir:这个宏从request中得到传输的方向，0表示从设备读，非零表示
 //向设备写数据
 
