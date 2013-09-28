@@ -63,13 +63,13 @@ module_param(use_napi, int, 0);
  * A structure representing an in-flight packet.
  */
 struct snull_packet {
-	struct snull_packet *next;
-	struct net_device *dev;
-	int	datalen;
-	u8 data[ETH_DATA_LEN];//ETH_DATA_LEN defines in [linux/if_ether.h]
+	struct snull_packet *next;//指向下一个结构的指针
+	struct net_device *dev;//网络接口
+	int	datalen;//有效数据长度
+	u8 data[ETH_DATA_LEN];//ETH_DATA_LEN defines in [linux/if_ether.h]==1500
 };
 
-int pool_size = 8;
+int pool_size = 8;//初始化pool_size为8
 module_param(pool_size, int, 0);
 
 /*
@@ -79,14 +79,14 @@ module_param(pool_size, int, 0);
 
 struct snull_priv {
 	struct net_device_stats stats;//保存接口统计信息的标准地方
-	int status;
-	struct snull_packet *ppool;
+	int status;//状态
+	struct snull_packet *ppool;//存储池指针
 	struct snull_packet *rx_queue;  /* List of incoming packets */
 	int rx_int_enabled;//接收数据包中断允许标志位
-	int tx_packetlen;
-	u8 *tx_packetdata;
+	int tx_packetlen;//发送包长度
+	u8 *tx_packetdata;//发送数据
 	struct sk_buff *skb;//套接字缓冲区
-	spinlock_t lock;
+	spinlock_t lock;//自旋锁,用于实现互斥访问
 };
 
 static void snull_tx_timeout(struct net_device *dev);
@@ -97,23 +97,24 @@ static void (*snull_interrupt)(int, void *, struct pt_regs *);
  */
 void snull_setup_pool(struct net_device *dev)
 {
-	struct snull_priv *priv = netdev_priv(dev);
+	struct snull_priv *priv = netdev_priv(dev);//获得priv指针
 	int i;
 	struct snull_packet *pkt;
 
 	priv->ppool = NULL;
-	for (i = 0; i < pool_size; i++) {
-		pkt = kmalloc (sizeof (struct snull_packet), GFP_KERNEL);
-		if (pkt == NULL) {
+	for (i = 0; i < pool_size; i++) {//初始化pool
+		pkt = kmalloc (sizeof (struct snull_packet), GFP_KERNEL);//申请空间
+		if (pkt == NULL) {//若失败,输出错误信息,返回
 			printk (KERN_NOTICE "Ran out of memory allocating packet pool\n");
 			return;
 		}
-		pkt->dev = dev;
+		pkt->dev = dev;//保存dev信息
 		pkt->next = priv->ppool;
-		priv->ppool = pkt;
+		priv->ppool = pkt;//更新ppool指针
 	}
 }
 
+//销毁pool
 void snull_teardown_pool(struct net_device *dev)
 {
 	struct snull_priv *priv = netdev_priv(dev);
@@ -136,11 +137,11 @@ struct snull_packet *snull_get_tx_buffer(struct net_device *dev)
 	struct snull_packet *pkt;
     
 	spin_lock_irqsave(&priv->lock, flags);//在获得自旋锁之前禁用中断,先前的中断状态保存在flags里面
-	pkt = priv->ppool;
+	pkt = priv->ppool;//从priv->ppool链表中摘取一个元素
 	priv->ppool = pkt->next;
-	if (priv->ppool == NULL) {
+	if (priv->ppool == NULL) {//若已到达末尾,输出错误
 		printk (KERN_INFO "Pool empty\n");
-		netif_stop_queue(dev);
+		netif_stop_queue(dev);//标记设备不能传输其他数据包
 	}
 	spin_unlock_irqrestore(&priv->lock, flags);//释放自旋锁
 	return pkt;
@@ -152,7 +153,7 @@ void snull_release_buffer(struct snull_packet *pkt)
 	unsigned long flags;
 	struct snull_priv *priv = netdev_priv(pkt->dev);
 	
-	spin_lock_irqsave(&priv->lock, flags);
+	spin_lock_irqsave(&priv->lock, flags);//在获得自旋锁之前禁用中断,先前的中断状态保存在flags里面
 	pkt->next = priv->ppool;
 	priv->ppool = pkt;
 	spin_unlock_irqrestore(&priv->lock, flags);
@@ -219,7 +220,7 @@ int snull_release(struct net_device *dev)
 {
     /* release ports, irq and such -- like fops->close */
 
-	netif_stop_queue(dev); /* can't transmit any more */
+	netif_stop_queue(dev); /* can't transmit any more *///不再继续传输数据
 	return 0;
 }
 
@@ -259,20 +260,21 @@ void snull_rx(struct net_device *dev, struct snull_packet *pkt)
 	 * The packet has been retrieved from the transmission
 	 * medium. Build an skb around it, so upper layers can handle it
 	 */
-	skb = dev_alloc_skb(pkt->datalen + 2);
-	if (!skb) {
-		if (printk_ratelimit())
+	skb = dev_alloc_skb(pkt->datalen + 2);//分配一个保存数据包的缓冲区
+	if (!skb) {//检测返回值
+		if (printk_ratelimit())//当向控制台发送大量信息时,printk_ratelimit返回0
 			printk(KERN_NOTICE "snull rx: low on mem - packet dropped\n");
 		priv->stats.rx_dropped++;
 		goto out;
 	}
 	skb_reserve(skb, 2); /* align IP on 16B boundary */  
+	//skb_put在缓冲区尾部添加数据,每个函数的返回值是skb->tail的先前值
 	memcpy(skb_put(skb, pkt->datalen), pkt->data, pkt->datalen);
 
 	/* Write metadata, and then pass to the receive level */
 	skb->dev = dev;
 	skb->protocol = eth_type_trans(skb, dev);
-	skb->ip_summed = CHECKSUM_UNNECESSARY; /* don't check it */
+	skb->ip_summed = CHECKSUM_UNNECESSARY; /* don't check it *///不进行任何校验和的计算
 	priv->stats.rx_packets++;
 	priv->stats.rx_bytes += pkt->datalen;
 	netif_rx(skb);//将套接字缓冲传递给上层软件处理
@@ -282,11 +284,11 @@ void snull_rx(struct net_device *dev, struct snull_packet *pkt)
     
 
 /*
- * The poll implementation.
+ * The poll implementation.budget参数提供了能传递给内核的最大数据包数
  */
 static int snull_poll(struct net_device *dev, int *budget)
 {
-	int npackets = 0, quota = min(dev->quota, *budget);
+	int npackets = 0, quota = min(dev->quota, *budget);//quota给出了传递个内核的最大包数,选择两者的小者
 	struct sk_buff *skb;
 	struct snull_priv *priv = netdev_priv(dev);
 	struct snull_packet *pkt;
@@ -306,7 +308,7 @@ static int snull_poll(struct net_device *dev, int *budget)
 		skb->dev = dev;
 		skb->protocol = eth_type_trans(skb, dev);
 		skb->ip_summed = CHECKSUM_UNNECESSARY; /* don't check it */
-		netif_receive_skb(skb);
+		netif_receive_skb(skb);//将数据包传递给内核
 		
         	/* Maintain stats */
 		npackets++;
@@ -318,8 +320,8 @@ static int snull_poll(struct net_device *dev, int *budget)
 	*budget -= npackets;//budget参数提供了能传递给内核的最大数据包数
 	dev->quota -= npackets;//dev->quota给出了另一个最大值
 	if (! priv->rx_queue) {//如果处理完所有的数据包，则告诉内核并重新打开中断
-		netif_rx_complete(dev);
-		snull_rx_ints(dev, 1);
+		netif_rx_complete(dev);//关闭轮询函数
+		snull_rx_ints(dev, 1);//打开接收中断
 		return 0;
 	}
 	/* We couldn't process everything. */
@@ -329,6 +331,7 @@ static int snull_poll(struct net_device *dev, int *budget)
         
 /*
  * The typical interrupt entry point
+ * 新数据包到达或者外发数据包的传输已完成
  */
 static void snull_regular_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
@@ -354,7 +357,7 @@ static void snull_regular_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	/* retrieve statusword: real netdevices use I/O instructions */
 	statusword = priv->status;
 	priv->status = 0;
-	if (statusword & SNULL_RX_INTR) {
+	if (statusword & SNULL_RX_INTR) {//新数据包到达
 		/* send it to snull_rx for handling */
 		pkt = priv->rx_queue;
 		if (pkt) {
@@ -362,11 +365,11 @@ static void snull_regular_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 			snull_rx(dev, pkt);
 		}
 	}
-	if (statusword & SNULL_TX_INTR) {
+	if (statusword & SNULL_TX_INTR) {//外发数据包传输完成
 		/* a transmission is over: free the skb */
-		priv->stats.tx_packets++;
+		priv->stats.tx_packets++;//更新统计信息
 		priv->stats.tx_bytes += priv->tx_packetlen;
-		dev_kfree_skb(priv->skb);
+		dev_kfree_skb(priv->skb);//释放缓冲区,将套接字缓冲区返回给系统
 	}
 
 	/* Unlock the device and we are done */
@@ -377,6 +380,7 @@ static void snull_regular_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 /*
  * A NAPI interrupt handler.
+ * 基于轮询方式的接口
  */
 static void snull_napi_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
@@ -401,15 +405,15 @@ static void snull_napi_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	/* retrieve statusword: real netdevices use I/O instructions */
 	statusword = priv->status;
 	priv->status = 0;
-	if (statusword & SNULL_RX_INTR) {
-		snull_rx_ints(dev, 0);  /* Disable further interrupts */
-		netif_rx_schedule(dev);
+	if (statusword & SNULL_RX_INTR) {//新数据到达
+		snull_rx_ints(dev, 0);  /* Disable further interrupts *///禁止以后的中断
+		netif_rx_schedule(dev);//负责在此后的某个时间点调用poll函数
 	}
-	if (statusword & SNULL_TX_INTR) {
+	if (statusword & SNULL_TX_INTR) {//发送数据传输完毕
         	/* a transmission is over: free the skb */
 		priv->stats.tx_packets++;
 		priv->stats.tx_bytes += priv->tx_packetlen;
-		dev_kfree_skb(priv->skb);
+		dev_kfree_skb(priv->skb);//将套接字缓冲区返回给系统
 	}
 
 	/* Unlock the device and we are done */
@@ -462,7 +466,7 @@ static void snull_hw_tx(char *buf, int len, struct net_device *dev)
 	((u8 *)daddr)[2] ^= 1;
 
 	ih->check = 0;         /* and rebuild the checksum (ip needs it) */
-	ih->check = ip_fast_csum((unsigned char *)ih,ih->ihl);
+	ih->check = ip_fast_csum((unsigned char *)ih,ih->ihl);//校验ip数据包
 
 	if (dev == snull_devs[0])
 		PDEBUGG("%08x:%05i --> %08x:%05i\n",
@@ -479,8 +483,8 @@ static void snull_hw_tx(char *buf, int len, struct net_device *dev)
 	 * transmission-done on the transmitting device
 	 */
 	dest = snull_devs[dev == snull_devs[0] ? 1 : 0];
-	priv = netdev_priv(dest);
-	tx_buffer = snull_get_tx_buffer(dev);
+	priv = netdev_priv(dest);//获取priv指针
+	tx_buffer = snull_get_tx_buffer(dev);//
 	tx_buffer->datalen = len;
 	memcpy(tx_buffer->data, buf, len);
 	snull_enqueue_buf(dest, tx_buffer);
@@ -583,14 +587,14 @@ int snull_rebuild_header(struct sk_buff *skb)
 	return 0;
 }
 
-
+//该函数(在hard_start_xmit前被调用)根据先前检索到的源和目标硬件地址建立硬件头
 int snull_header(struct sk_buff *skb, struct net_device *dev,
                 unsigned short type, void *daddr, void *saddr,
                 unsigned int len)
 {
-	struct ethhdr *eth = (struct ethhdr *)skb_push(skb,ETH_HLEN);
+	struct ethhdr *eth = (struct ethhdr *)skb_push(skb,ETH_HLEN);//减少skb->data,并增加skb->len.除了数据添加在数据包的头部而不是尾部外,功能类似于skb_put
 
-	eth->h_proto = htons(type);
+	eth->h_proto = htons(type);//主机到网络
 	memcpy(eth->h_source, saddr ? saddr : dev->dev_addr, dev->addr_len);
 	memcpy(eth->h_dest,   daddr ? daddr : dev->dev_addr, dev->addr_len);
 	eth->h_dest[ETH_ALEN-1]   ^= 0x01;   /* dest is us xor 1 */
@@ -617,7 +621,7 @@ int snull_change_mtu(struct net_device *dev, int new_mtu)
 	/*
 	 * Do anything you need, and the accept the value
 	 */
-	spin_lock_irqsave(lock, flags);
+	spin_lock_irqsave(lock, flags);//在获得自旋锁前禁止中断(只在本地处理器上),先前的中断状态保存在flags中
 	dev->mtu = new_mtu;
 	spin_unlock_irqrestore(lock, flags);
 	return 0; /* success */
@@ -627,6 +631,7 @@ int snull_change_mtu(struct net_device *dev, int new_mtu)
  * The init function (sometimes called probe).
  * It is invoked by register_netdev()
  */
+//初始化函数,用于设置net_device结构剩余部分
 void snull_init(struct net_device *dev)
 {
 	struct snull_priv *priv;
@@ -643,6 +648,7 @@ void snull_init(struct net_device *dev)
 	 * hand assignments
 	 */
 	ether_setup(dev); /* assign some of the fields */
+	//对其中的一些成员赋值
 
 	dev->open            = snull_open;
 	dev->stop            = snull_release;
@@ -652,25 +658,25 @@ void snull_init(struct net_device *dev)
 	dev->get_stats       = snull_stats;
 	dev->change_mtu      = snull_change_mtu;  
 	dev->rebuild_header  = snull_rebuild_header;
-	dev->hard_header     = snull_header;
+	dev->hard_header     = snull_header;//该函数(在hard_start_xmit前被调用)根据先前检索到的源和目标硬件地址建立硬件头.任务是将作为参数传递进入的信息,组织成设备特有的适当硬件头
 	dev->tx_timeout      = snull_tx_timeout;
 	dev->watchdog_timeo = timeout;
-	if (use_napi) {
+	if (use_napi) {//使用轮询,非中断方式
 		dev->poll        = snull_poll;
 		dev->weight      = 2;
 	}
 	/* keep the default flags, just add NOARP */
-	dev->flags           |= IFF_NOARP;
-	dev->features        |= NETIF_F_NO_CSUM;
+	dev->flags           |= IFF_NOARP;//接口不能使用地址解析协议(ARP)
+	dev->features        |= NETIF_F_NO_CSUM;//不要对接口传出系统的全部的数据包使用校验
 	dev->hard_header_cache = NULL;      /* Disable caching */
 
 	/*
 	 * Then, initialize the priv field. This encloses the statistics
 	 * and a few private fields.
 	 */
-	priv = netdev_priv(dev);
-	memset(priv, 0, sizeof(struct snull_priv));
-	spin_lock_init(&priv->lock);
+	priv = netdev_priv(dev);//priv指针与net_device结构一起分配,当需要访问私有数据结构指针时,应当使用netdev_priv函数
+	memset(priv, 0, sizeof(struct snull_priv));//初始化snull_priv为0
+	spin_lock_init(&priv->lock);//初始化自旋锁
 	snull_rx_ints(dev, 1);		/* enable receive interrupts */
 	snull_setup_pool(dev);
 }
@@ -678,7 +684,7 @@ void snull_init(struct net_device *dev)
 /*
  * The devices
  */
-
+//使用两个接口,sn0和sn1
 struct net_device *snull_devs[2];
 
 
@@ -693,9 +699,9 @@ void snull_cleanup(void)
     
 	for (i = 0; i < 2;  i++) {
 		if (snull_devs[i]) {
-			unregister_netdev(snull_devs[i]);
-			snull_teardown_pool(snull_devs[i]);
-			free_netdev(snull_devs[i]);
+			unregister_netdev(snull_devs[i]);//从系统中删除接口snull_devs[i]
+			snull_teardown_pool(snull_devs[i]);//
+			free_netdev(snull_devs[i]);//将net_device结构返回给系统
 		}
 	}
 	return;
@@ -711,6 +717,7 @@ int snull_init_module(void)
 	snull_interrupt = use_napi ? snull_napi_interrupt : snull_regular_interrupt;
 
 	/* Allocate the devices */
+	//动态分配设备
 	snull_devs[0] = alloc_netdev(sizeof(struct snull_priv), "sn%d",
 			snull_init);
 	snull_devs[1] = alloc_netdev(sizeof(struct snull_priv), "sn%d",
@@ -720,7 +727,7 @@ int snull_init_module(void)
 
 	ret = -ENODEV;
 	for (i = 0; i < 2;  i++)
-		if ((result = register_netdev(snull_devs[i])))
+		if ((result = register_netdev(snull_devs[i])))//注册接口snull_devs[i]
 			printk("snull: error %i registering device \"%s\"\n",
 					result, snull_devs[i]->name);
 		else

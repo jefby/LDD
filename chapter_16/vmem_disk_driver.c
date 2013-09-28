@@ -267,19 +267,19 @@ static void vmem_disk_request(struct request_queue *q)
 {
 	struct request *req;
 	//获取队列中第一个未完成的请求（由I/O调度器决定），当没有请求需要处理时，该函数返回NULL
-	while((req=blk_fetch_request(q)) != NULL){
+	while((req=elv_next_request(q)) != NULL){
 		struct vmem_disk_dev *dev = req->rq_disk->private_data;
 		//告诉用户该请求是否是一个文件系统请求--移动块数据的请求
-		if(!blk_account_rq(req)){
+		if(!blk_fs_request(req)){
 			printk(KERN_NOTICE "Skip non-fs request\n");
-			blk_end_request_all(req,0);//传递0表示不能成功的完成该请求
+			end_request(req,0);//传递0表示不能成功的完成该请求
 			continue;
 		}
 		//数据移动,req->sector：开始扇区的索引号,req->current_nr_sectors:需要传输的扇区数 buffer:要传输或者要接收数据的缓冲区指针
 		//该指针在内核虚拟地址中，如果有需要，内核可以直接引用它 req_data_dir:这个宏从request中得到传输的方向，0表示从设备读，非零表示
 		//向设备写数据
-		vmem_disk_transfer(dev,blk_rq_pos(req),blk_rq_cur_sectors(req),req->buffer,rq_data_dir(req));
-		blk_end_request_all(req,1);
+		vmem_disk_transfer(dev,req->sector,req->current_nr_sectors,req->buffer,rq_data_dir(req));
+		end_request(req,1);
 	}
 }
 
@@ -298,7 +298,7 @@ static int vmem_disk_xfer_bio(struct vmem_disk_dev *dev,struct bio *bio)
 		sector += bio_cur_bytes(bio)>>9;
 		__bio_kunmap_atomic(bio,KM_USER0);
 	}
-	return 0;
+	return 0;//always "succeed"
 }
 
 /*
@@ -307,16 +307,12 @@ static int vmem_disk_xfer_bio(struct vmem_disk_dev *dev,struct bio *bio)
  */
 static int vmem_disk_xfer_request(struct vmem_disk_dev *dev,struct request *req)
 {
-	struct req_iterator iter;
+	struct bio *bio;
 	int nsect = 0;
-	struct bio_vec *bvec;
-	rq_for_each_segment(bvec,req,iter){
-		char *buffer = __bio_kmap_atomic(iter.bio,iter.i,KM_USER0);
-		sector_t sector = iter.bio->bi_sector;
-		vmem_disk_transfer(dev,sector,bio_cur_bytes(iter.bio)>>9,buffer,bio_data_dir(iter.bio)==WRITE);
-		sector += bio_cur_bytes(iter.bio)>>9;
-		__bio_kunmap_atomic(iter.bio,KM_USER0);
-		nsect += iter.bio->bi_size / KERNEL_SECTOR_SIZE;
+
+	rq_for_each_bio(bio,req){
+		vmem_disk_xfer_bio(dev,bio);//传输一个bio
+		nsect += bio->bio_size / KERNEL_SECTOR_SIZE;//增加传输的扇区数目
 	}
 	return nsect;
 }
@@ -329,14 +325,18 @@ static void vmem_disk_full_request(struct request_queue *q)
 	int sectors_xferred;
 	struct vmem_disk_dev *dev = q->queuedata;
 	
-	while((req=blk_fetch_request(q)) != NULL){
-		if(!blk_account_rq(req)){
+	while((req=elv_next_request(q)) != NULL){//返回队列中需要处理的下一个请求指针
+		if(!blk_fs_request(req)){//查看是否是有效的传输数据请求
 			printk(KERN_NOTICE "Skip non-fs request\n");
-			blk_end_request_all(req,0);
+			end_request(req,0);
 			continue;
 		}
-		sectors_xferred = vmem_disk_xfer_request(dev,req);
-		blk_end_request_all(req,1);
+		
+		sectors_xferred = vmem_disk_xfer_request(dev,req);//传输sectors_xferred个扇区
+		if(!end_that_request_first(req,1,sectors_xferred)){//驱动程序从上次结束的地方开始，传输了sectors_xferred个扇区
+			blkdev_dequeue_request(req);//将请求从队列中删除
+			end_that_request_last(req);//通知任何等待已经完成请求的对象
+		}
 	}
 }
 
@@ -353,7 +353,7 @@ static int vmem_disk_make_request(struct request_queue *q,struct bio *bio)
 	//传输一个单独的BIO
 	status = vmem_disk_xfer_bio(dev,bio);
 	//在整个bio块上结束传输,status是返回值,status为0，表示成功，非0值表示错误
-	bio_endio(bio,status);
+	bio_endio(bio,bio->bio_size,status);
 	return 0;
 }
 
